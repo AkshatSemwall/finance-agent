@@ -66,3 +66,7 @@ app.include_router(insights.router)
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+
+
