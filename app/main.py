@@ -62,7 +62,20 @@ app.include_router(chat.router)
 app.include_router(transactions.router)
 app.include_router(insights.router)
 
+from fastapi.responses import HTMLResponse
 
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return """
+    <html>
+        <head><title>Personal Finance Agent</title></head>
+        <body>
+            <h1>Personal Finance Agent API</h1>
+            <p>API is live and running.</p>
+            <a href="/docs">View API Docs</a>
+        </body>
+    </html>
+    """
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok")
