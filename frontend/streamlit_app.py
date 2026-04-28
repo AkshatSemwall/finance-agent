@@ -1,26 +1,20 @@
-"""Streamlit UI for the Personal Finance Agent."""
-from __future__ import annotations
-
+import os
 import pandas as pd
 import requests
 import streamlit as st
 
 st.set_page_config(page_title="Personal Finance Agent", layout="wide")
 
-# Sidebar
-with st.sidebar:
-    st.title("⚙️ Settings")
-    backend_url = st.text_input("Backend URL", value="http://localhost:8000")
-    if st.button("🗑️ Clear Memory"):
-        try:
-            requests.delete(f"{backend_url}/memory")
-            st.success("Memory cleared.")
-        except Exception as e:
-            st.error(f"Error: {e}")
+# Backend URL
+if "backend_url" not in st.session_state:
+    st.session_state.backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+
+backend_url = st.text_input("Backend URL", value=st.session_state.backend_url)
+st.session_state.backend_url = backend_url
 
 st.title("💰 Personal Finance Agent")
 
-tab_chat, tab_txns, tab_insights = st.tabs(["Chat", "Transactions", "Weekly Insights"])
+tab_chat, tab_upload, tab_txns, tab_insights = st.tabs(["Chat", "Upload CSV", "Transactions", "Weekly Insights"])
 
 # --- Chat Tab ---
 with tab_chat:
@@ -41,55 +35,40 @@ with tab_chat:
                 f"{backend_url}/chat", json={"message": user_input}, timeout=30,
             )
             data = resp.json()
-            reply = data.get("reply", "No response.")
-            context = data.get("memory_context")
+            reply = data["response"]
         except Exception as e:
             reply = f"Error contacting backend: {e}"
-            context = None
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
         with st.chat_message("assistant"):
             st.write(reply)
-            if context:
-                with st.expander("Memory context used"):
-                    for item in context:
-                        st.write(f"- {item}")
 
-# --- Transactions Tab ---
-with tab_txns:
-    st.subheader("Upload Transactions (CSV)")
+# --- Upload CSV Tab ---
+with tab_upload:
+    st.subheader("Upload Transactions CSV")
     uploaded = st.file_uploader("Choose a CSV file", type="csv")
-    if uploaded and st.button("Sync"):
+    if uploaded and st.button("Upload and Sync"):
+        # Save to temp and sync
+        with open("temp.csv", "wb") as f:
+            f.write(uploaded.getvalue())
         try:
             resp = requests.post(
-                f"{backend_url}/sync",
-                files={"file": ("transactions.csv", uploaded.getvalue(), "text/csv")},
-                timeout=30,
+                f"{backend_url}/sync", json={"csv_path": "temp.csv"}, timeout=30,
             )
-            st.success(resp.json().get("message", "Synced."))
+            st.success(resp.json()["message"])
         except Exception as e:
             st.error(f"Error: {e}")
 
+# --- Transactions Tab ---
+with tab_txns:
     st.subheader("Transaction History")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        days_filter = st.number_input("Days", min_value=1, value=30)
-    with col2:
-        cat_filter = st.text_input("Category (optional)")
-    with col3:
-        min_amt = st.number_input("Min amount", min_value=0.0, value=0.0)
-
     if st.button("Load Transactions"):
-        params: dict = {"days": days_filter}
-        if cat_filter:
-            params["category"] = cat_filter
-        if min_amt > 0:
-            params["min_amount"] = min_amt
         try:
-            resp = requests.get(f"{backend_url}/transactions", params=params, timeout=10)
+            resp = requests.get(f"{backend_url}/transactions", timeout=10)
             txns = resp.json()
             if txns:
-                st.dataframe(pd.DataFrame(txns))
+                df = pd.DataFrame(txns)
+                st.dataframe(df)
             else:
                 st.info("No transactions found.")
         except Exception as e:
@@ -98,6 +77,26 @@ with tab_txns:
 # --- Weekly Insights Tab ---
 with tab_insights:
     st.subheader("Weekly Spending Insights")
+    if st.button("Load Insights"):
+        try:
+            resp = requests.get(f"{backend_url}/insights/weekly", timeout=10)
+            insights = resp.json()
+            st.write(f"Total spent this week: ${insights['total_spent']:.2f}")
+            st.write("By category:")
+            for cat, amt in insights['by_category'].items():
+                st.write(f"- {cat}: ${amt:.2f}")
+            st.write(f"Transaction count: {insights['transaction_count']}")
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+# Sidebar
+with st.sidebar:
+    if st.button("🗑️ Clear Memory"):
+        try:
+            requests.delete(f"{backend_url}/memory")
+            st.success("Memory cleared.")
+        except Exception as e:
+            st.error(f"Error: {e}")
     if st.button("Generate Insight"):
         try:
             resp = requests.get(f"{backend_url}/insights/weekly", timeout=30)
